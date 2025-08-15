@@ -1,5 +1,7 @@
 // service-worker.js
-const CACHE_NAME = 'fruit-sales-cache-v2';
+const SW_VERSION = 'v1.0.4'; // เปลี่ยนเวอร์ชันนี้ทุกครั้งที่อัปเดต
+const CACHE_NAME = `app-cache-${SW_VERSION}`;
+
 const ASSETS_TO_CACHE = [
     'https://cdn.jsdelivr.net/npm/chart.js',
      'chartExt.js',

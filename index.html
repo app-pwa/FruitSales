@@ -17,10 +17,38 @@
         <script type="module" src="db.js"></script>
         <script type="module" src="ui.js"></script>
         <script type="module" src="app.js"></script>
-        <!--<script type="module" src="sw_register.js"></script>-->
+        <script type="module" src="sw_register.js"></script>
 
     </head>
     <body class="bg-gray-50">
+        <script>
+// ตรวจสอบและอัปเดต Service Worker
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('service_worker.js').then(registration => {
+                        console.log(`SW registered with scope: ${registration.scope}`);
+
+                        // ตรวจสอบการอัปเดตทุกครั้งที่โหลดหน้า
+                        registration.update().then(() => {
+                            console.log('Checking for SW updates...');
+                        });
+
+                        // ฟังเหตุการณ์เมื่อมี SW ใหม่
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            console.log('New SW found:', newWorker);
+
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'activated') {
+                                    console.log('New SW activated! Reloading page...');
+                                    window.location.reload();
+                                }
+                            });
+                        });
+                    });
+                });
+            }
+        </script>
         <div class="container mx-auto px-4 py-8 max-w-3xl">
             <!-- Header -->
             <header class="mb-8">
@@ -170,6 +198,7 @@
                             </button>
                         </div>
                     </div>
+                   
                 </div>
             </section>
         </div>
