@@ -3,9 +3,9 @@ const SW_VERSION = 'v1.0.4'; // เปลี่ยนเวอร์ชันน
 const CACHE_NAME = `app-cache-${SW_VERSION}`;
 
 const ASSETS_TO_CACHE = [
+    'index.html',
     'https://cdn.jsdelivr.net/npm/chart.js',
      'chartExt.js',
-    'index.html',
     'styles.css',
     'db.js',
     'ui.js',
@@ -38,7 +38,29 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-    event.respondWith(
-            caches.match(event.request).then(resp => resp || fetch(event.request))
-            );
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => {
+        // ไฟล์พบใน Cache
+        if (response) {
+          return response;
+        }
+
+        // ไม่พบใน Cache -> พยายาม fetch จากเครือข่าย
+        return fetch(event.request)
+          .catch(error => {
+            // Fallback สำหรับเมื่อออฟไลน์
+            if (event.request.mode === 'navigate') {
+              return caches.match('index.html');
+            }
+            
+            // Fallback สำหรับ asset อื่นๆ
+            return new Response('ออฟไลน์: ไม่สามารถโหลดทรัพยากรนี้ได้', {
+              status: 503,
+              statusText: 'Service Unavailable',
+              headers: new Headers({'Content-Type': 'text/plain'})
+            });
+          });
+      })
+  );
 });
