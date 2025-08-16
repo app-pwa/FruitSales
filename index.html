@@ -21,34 +21,7 @@
 
     </head>
     <body class="bg-gray-50">
-        <script>
-// ตรวจสอบและอัปเดต Service Worker
-            if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('service_worker.js').then(registration => {
-                        console.log(`SW registered with scope: ${registration.scope}`);
 
-                        // ตรวจสอบการอัปเดตทุกครั้งที่โหลดหน้า
-                        registration.update().then(() => {
-                            console.log('Checking for SW updates...');
-                        });
-
-                        // ฟังเหตุการณ์เมื่อมี SW ใหม่
-                        registration.addEventListener('updatefound', () => {
-                            const newWorker = registration.installing;
-                            console.log('New SW found:', newWorker);
-
-                            newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'activated') {
-                                    console.log('New SW activated! Reloading page...');
-                                    window.location.reload();
-                                }
-                            });
-                        });
-                    });
-                });
-            }
-        </script>
         <div class="container mx-auto px-4 py-8 max-w-3xl">
             <!-- Header -->
             <header class="mb-8">
@@ -78,9 +51,7 @@
                                 <select id="fruit-type" class="flex-grow p-2 border border-gray-300 rounded-l-md">
                                     <option value="">เลือกชนิดผลไม้</option>
                                 </select>
-                                <!--                                <button id="add-fruit-btn" class="bg-gray-200 px-3 rounded-r-md">
-                                                                    <i class="fas fa-plus text-gray-600"></i>
-                                                                </button>-->
+
                             </div>
                         </div>
                     </div>
@@ -95,9 +66,16 @@
                         </button>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-lg shadow-md p-6">
-                    <h2 class="text-xl font-semibold text-gray-800 mb-4">ประวัติการขาย</h2>
+                    <div class="flex justify-between items-center mb-4"> <!-- เพิ่ม div นี้ -->
+                        <h2 class="text-xl font-semibold text-gray-800">ประวัติการขาย</h2>
+                        <div class="flex items-center space-x-2" id="div-yearFilter">
+                            
+                            
+                        </div>
+                    </div>
+
+                    <!-- ส่วนตารางประวัติการขาย -->
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
@@ -198,8 +176,12 @@
                             </button>
                         </div>
                     </div>
-                   
+
                 </div>
+
+      
+
+
             </section>
         </div>
         <div id="add-option-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">

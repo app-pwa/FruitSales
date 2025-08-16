@@ -27,6 +27,12 @@ function resetForm() {
     document.getElementById('fruit-type').value = '';
     document.getElementById('save-btn-text').textContent = 'บันทึกการขาย';
     document.getElementById('save-sale-btn').classList.replace('bg-blue-600', 'bg-green-600');
+
+    // ลบปุ่มยกเลิกถ้ามี
+    const cancelBtn = document.getElementById('cancel-edit-btn');
+    if (cancelBtn)
+        cancelBtn.remove();
+
     addNewItem();
 }
 
@@ -60,6 +66,7 @@ function setupHandlers() {
     document.getElementById('export-btn').onclick = exportData; // ส่งออกข้อมูล
     document.getElementById('import-file').addEventListener('change', handleFileImport); // นำเข้าข้อมูล
     document.getElementById('delete-all-btn').onclick = confirmDeleteAllData;
+
 
 }
 
@@ -174,17 +181,49 @@ async function saveSale() {
     // รีเซ็ตฟอร์ม
     resetForm();
     renderSales(await getAllSales());
+    // แสดงทั้งหมดครั้งแรก
+    //  
 }
-// แก้ไขฟังก์ชัน renderSales
-function renderSales(sales) {
+// เพิ่มฟังก์ชันกรองข้อมูล
+async function renderSales(sales) {
     const tbody = document.getElementById('sales-history-body');
+    const div_yearFilter = document.getElementById('div-yearFilter');
+
     tbody.innerHTML = '';
 
-    sales.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(sale => {
-        const tr = document.createElement('tr');
-        const items = sale.items.map(i => `${i.type} ${i.weight}กก. x ${i.pricePerKg}฿`).join('<br>');
+    // เพิ่ม Dropdown กรองปี
+    const yearFilter = document.createElement('div');
+    yearFilter.className = 'mb-4';
+    yearFilter.innerHTML = `
+    <label class="block text-sm font-medium text-gray-700 mb-1">กรองตามปี</label>
+    <select id="year-filter" class="w-full p-2 border border-gray-300 rounded-md">
+      <option value="all">ทุกปี</option>
+      ${[...new Set(sales.map(s => new Date(s.date).getFullYear()))]
+            .sort((a, b) => b - a)
+            .map(year => `<option value="${year}">${year}</option>`)
+            .join('')}
+    </select>
+  `;
+    div_yearFilter.append(yearFilter);
 
-        tr.innerHTML = `
+    // ฟังก์ชันกรอง
+    const filterSales = (selectedYear) => {
+        const filtered = selectedYear === 'all'
+                ? sales
+                : sales.filter(s => new Date(s.date).getFullYear() === Number(selectedYear));
+
+        displaySales(filtered);
+    };
+
+    // แสดงข้อมูล
+    const displaySales = (filteredSales) => {
+        tbody.innerHTML = '';
+        filteredSales.sort((a, b) => new Date(b.date) - new Date(a.date)).forEach(sale => {
+            // ...โค้ดเดิมแสดงรายการขาย...
+            const tr = document.createElement('tr');
+            const items = sale.items.map(i => `${i.type} ${i.weight}กก. x ${i.pricePerKg}฿`).join('<br>');
+
+            tr.innerHTML = `
       <td class="px-6 py-4 text-sm text-gray-500">${sale.date}</td>
       <td class="px-6 py-4 text-sm">${sale.fruit}</td>
       <td class="px-6 py-4 text-sm">${items}</td>
@@ -201,10 +240,18 @@ function renderSales(sales) {
       </td>
     `;
 
-        tr.querySelector('.edit-sale').addEventListener('click', () => enterEditMode(sale));
-        tr.querySelector('.delete-sale').addEventListener('click', deleteSaleHandler);
-        tbody.appendChild(tr);
+            tr.querySelector('.edit-sale').addEventListener('click', () => enterEditMode(sale));
+            tr.querySelector('.delete-sale').addEventListener('click', deleteSaleHandler);
+            tbody.appendChild(tr);
+        });
+    };
+
+    // Event Listener
+    document.getElementById('year-filter').addEventListener('change', (e) => {
+        filterSales(e.target.value);
     });
+
+    filterSales('all');
 }
 
 // เพิ่มฟังก์ชันนี้ใน app.js
@@ -227,41 +274,52 @@ async function deleteSaleHandler(event) {
 }
 // ฟังก์ชันเข้าสู่โหมดแก้ไข
 function enterEditMode(sale) {
-  isEditMode = true;
-  currentEditId = sale.id;
-  
-  // เติมข้อมูลลงฟอร์ม
-  document.getElementById('sale-date').value = sale.date;
-  document.getElementById('fruit-type').value = sale.fruit;
-  
-  // ล้างและเติมรายการ
-  const container = document.getElementById('items-container');
-  container.innerHTML = '';
-  
-  sale.items.forEach((item, index) => {
-    const entry = createItemEntry(index, saleTypeOptions, gardenOptions);
-    container.appendChild(entry);
-    
-    entry.querySelector('.item-type').value = item.type;
-    entry.querySelector('.garden').value = item.garden;
-    entry.querySelector('.weight').value = item.weight;
-    entry.querySelector('.price-per-kg').value = item.pricePerKg;
-    
-    entry.querySelector('.remove-item-btn').onclick = () => {
-      entry.remove();
-      reindexItems();
-    };
-  });
-  
-  // เปลี่ยนข้อความปุ่มบันทึก
-  document.getElementById('save-btn-text').textContent = 'บันทึกการแก้ไข';
-  document.getElementById('save-sale-btn').classList.replace('bg-green-600', 'bg-blue-600');
-  
-  // สลับไปแท็บขาย
-  switchTab('sales');
-  
-  // Scroll ไปที่ฟอร์ม
-  document.getElementById('sales-section').scrollIntoView({ behavior: 'smooth' });
+    isEditMode = true;
+    currentEditId = sale.id;
+
+    // เติมข้อมูลลงฟอร์ม
+    document.getElementById('sale-date').value = sale.date;
+    document.getElementById('fruit-type').value = sale.fruit;
+
+    // ล้างและเติมรายการ
+    const container = document.getElementById('items-container');
+    container.innerHTML = '';
+
+    sale.items.forEach((item, index) => {
+        const entry = createItemEntry(index, saleTypeOptions, gardenOptions);
+        container.appendChild(entry);
+
+        entry.querySelector('.item-type').value = item.type;
+        entry.querySelector('.garden').value = item.garden;
+        entry.querySelector('.weight').value = item.weight;
+        entry.querySelector('.price-per-kg').value = item.pricePerKg;
+
+        entry.querySelector('.remove-item-btn').onclick = () => {
+            entry.remove();
+            reindexItems();
+        };
+    });
+
+    // เปลี่ยนข้อความปุ่มบันทึก
+    document.getElementById('save-btn-text').textContent = 'บันทึกการแก้ไข';
+    document.getElementById('save-sale-btn').classList.replace('bg-green-600', 'bg-blue-600');
+
+    // สลับไปแท็บขาย
+    switchTab('sales');
+
+    // Scroll ไปที่ฟอร์ม
+    document.getElementById('sales-section').scrollIntoView({behavior: 'smooth'});
+
+    // เพิ่มปุ่มยกเลิก
+    const cancelBtn = document.createElement('button');
+    cancelBtn.id = 'cancel-edit-btn';
+    cancelBtn.className = 'bg-gray-500 text-white px-4 py-2 rounded-md ml-2';
+    cancelBtn.innerHTML = '<i class="fas fa-times mr-2"></i>ยกเลิก';
+
+    cancelBtn.addEventListener('click', resetForm);
+
+    document.getElementById('save-sale-btn').insertAdjacentElement('afterend', cancelBtn);
+
 }
 
 // แสดงรายการข้อมูลพื้นฐาน (ผลไม้, ประเภทการขาย, สวน)

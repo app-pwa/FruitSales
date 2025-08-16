@@ -41,7 +41,7 @@ async function populateFilters() {
 
     // เติมปี (เฉพาะปีที่มีข้อมูล)
     const yearSelect = document.getElementById('chart-year');
-    yearSelect.innerHTML = '<option value="all">ทุกปี</option>';
+    yearSelect.innerHTML = '';
 
     const uniqueYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))].sort((a, b) => b - a);
     uniqueYears.forEach(year => {
@@ -50,6 +50,11 @@ async function populateFilters() {
         option.textContent = year;
         yearSelect.appendChild(option);
     });
+
+    // เลือกปีล่าสุดเป็นค่าเริ่มต้น
+    if (uniqueYears.length > 0) {
+        yearSelect.value = uniqueYears[0];
+    }
 
     // เติมผลไม้
     const fruitSelect = document.getElementById('chart-fruit');
@@ -102,11 +107,12 @@ function setupChartControls() {
             updateChart(chartType);
 
             // ตั้งค่าการใช้งานของ Filter ปี
-            const disableYearSelect = ['yearly-income', 'price-per-kg'].includes(chartType);
+            const disableYearSelect = ['yearly-income', 'price-per-kg', 'price-trend'].includes(chartType);
             yearSelect.disabled = disableYearSelect;
 
             if (disableYearSelect) {
-                yearSelect.value = 'all';
+                const uniqueYears = [...document.getElementById('chart-year').options].map(opt => opt.value);
+                yearSelect.value = uniqueYears[0] || ''; // ตั้งค่าเป็นปีล่าสุด
             }
         });
     });
@@ -123,14 +129,12 @@ async function updateChart(chartType) {
 
     // กราฟที่ต้องการแสดงหลายปี (ไม่ให้เลือกปี)
     if (chartType === 'yearly-income' || chartType === 'price-per-kg') {
-        filters.year = 'all'; // ใช้ข้อมูลทุกปี
         document.getElementById('chart-year').disabled = true;
-        document.getElementById('chart-year').value = 'all';
     } else {
         document.getElementById('chart-year').disabled = false;
     }
 
-    const sales = await filterSales(filters);
+    const sales = await filterSales(filters, chartType);
 
     // สร้างกราฟ
     const ctx = document.getElementById('main-chart').getContext('2d');
@@ -141,6 +145,7 @@ async function updateChart(chartType) {
     currentChart = new Chart(ctx, getChartConfig(chartType, sales, filters));
     updateStats(sales);
 }
+
 function getCurrentFilters() {
     return {
         year: document.getElementById('chart-year').value,
@@ -150,10 +155,33 @@ function getCurrentFilters() {
     };
 }
 
-async function filterSales(filters) {
+async function filterSales(filters, chartType) {
     const allSales = await getAllSales();
 
-    return allSales.map(sale => {
+    // กรองข้อมูลตามประเภทกราฟ
+    if (chartType === 'yearly-income' || chartType === 'price-per-kg') {
+        // แสดง 3 ปีล่าสุดโดยไม่สนใจ filter ปี
+        const latestYears = [...new Set(allSales.map(s => new Date(s.date).getFullYear()))]
+            .sort((a, b) => b - a)
+            .slice(0, 3);
+        
+        return allSales
+            .filter(sale => latestYears.includes(new Date(sale.date).getFullYear()))
+            .map(processSaleItems(filters));
+    }
+    else if (chartType === 'price-trend') {
+        // แนวโน้มราคาใช้ข้อมูลทุกปี
+        return allSales.map(processSaleItems(filters));
+    }
+
+    // กราฟอื่นๆ กรองตามปีที่เลือก
+    return allSales
+        .filter(sale => new Date(sale.date).getFullYear() === Number(filters.year))
+        .map(processSaleItems(filters));
+}
+
+function processSaleItems(filters) {
+    return sale => {
         const filteredSale = {...sale, items: []};
 
         sale.items.forEach(item => {
@@ -176,12 +204,7 @@ async function filterSales(filters) {
             sum + (item.weight * item.pricePerKg), 0);
 
         return filteredSale;
-    })
-            .filter(sale =>
-                (filters.year === 'all' || new Date(sale.date).getFullYear() === Number(filters.year)) &&
-                        (filters.fruit === 'all' || sale.fruit === filters.fruit) &&
-                        sale.items.length > 0
-            );
+    };
 }
 
 function getChartConfig(chartType, sales, filters) {
@@ -191,19 +214,18 @@ function getChartConfig(chartType, sales, filters) {
         case 'price-trend':
             return getPriceTrendConfig(sales, filters);
         case 'yearly-income':
-            return getYearlyIncomeConfig(sales, filters);
+            return getYearlyIncomeConfig(sales);
         case 'price-per-kg':
-            return getPricePerKgConfig(sales, filters);
+            return getPricePerKgConfig(sales);
         default:
             return getMonthlyProductionConfig(sales, filters);
     }
 }
 
 function getMonthlyProductionConfig(sales, filters) {
-    // จัดกลุ่มข้อมูลตามเดือนและสวน
     const gardens = filters.garden === 'all'
-            ? [...new Set(sales.flatMap(s => s.items.map(i => i.garden)))]
-            : [filters.garden];
+        ? [...new Set(sales.flatMap(s => s.items.map(i => i.garden)))]
+        : [filters.garden];
 
     const colors = getNaturalFruitColors(gardens.length);
     const monthlyData = {};
@@ -226,84 +248,30 @@ function getMonthlyProductionConfig(sales, filters) {
         data: {
             labels: ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'],
             datasets: gardens.map((garden, i) => ({
-                    label: garden,
-                    data: monthlyData[garden],
-                    backgroundColor: colors[i],
-                    borderColor: colors[i],
-                    borderWidth: 1,
-                    borderRadius: 4,
-                    barPercentage: 0.8
-                }))
+                label: garden,
+                data: monthlyData[garden],
+                backgroundColor: colors[i],
+                borderColor: colors[i],
+                borderWidth: 1,
+                borderRadius: 4,
+                barPercentage: 0.8
+            }))
         },
         options: getChartOptions()
     };
 }
 
 function getPriceTrendConfig(sales, filters) {
-    // กรณีเลือกปีเดียว
-    if (filters.year !== 'all') {
-        const selectedYear = Number(filters.year);
-        const filteredSales = sales
-                .filter(s => new Date(s.date).getFullYear() === selectedYear)
-                .sort((a, b) => new Date(a.date) - new Date(b.date));
-
-        const labels = [];
-        const prices = [];
-
-        filteredSales.forEach(sale => {
-            const date = new Date(sale.date);
-            labels.push(`${date.getDate()}/${date.getMonth() + 1}`);
-
-            let totalWeight = 0;
-            let totalValue = 0;
-
-            sale.items.forEach(item => {
-                totalWeight += item.weight;
-                totalValue += (item.weight * item.pricePerKg);
-            });
-
-            const avgPrice = totalWeight > 0 ? (totalValue / totalWeight) : 0;
-            prices.push(avgPrice);
-        });
-
-        return {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                        label: `ราคาจริงปี ${selectedYear}`,
-                        data: prices,
-                        borderColor: '#2A9D8F',
-                        backgroundColor: 'rgba(42, 157, 143, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.1,
-                        fill: false,
-                        pointRadius: 3
-                    }]
-            },
-            options: getChartOptions()
-        };
-    }
-
-    // กรณีเลือกทุกปี - แสดง 3 ปีล่าสุดแบบรายเดือน
+    // แสดงข้อมูล 3 ปีล่าสุดสำหรับแนวโน้มราคา
     const allYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))]
-            .sort((a, b) => b - a)
-            .slice(0, 3);
+        .sort((a, b) => b - a)
+        .slice(0, 3);
 
-    // สีสำหรับแต่ละปี
     const colors = ['#2A9D8F', '#E9C46A', '#E76F51'];
-
-    // สร้าง labels เป็นเดือน
-    const monthLabels = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    const monthLabels = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
     const datasets = allYears.map((year, index) => {
-        // กรองข้อมูลเฉพาะปี
-        const yearlySales = sales.filter(s =>
-            new Date(s.date).getFullYear() === year
-        );
-
-        // จัดกลุ่มข้อมูลตามเดือน
+        const yearlySales = sales.filter(s => new Date(s.date).getFullYear() === year);
         const monthlyData = groupByMonth(yearlySales, year);
 
         return {
@@ -316,7 +284,7 @@ function getPriceTrendConfig(sales, filters) {
             fill: false,
             pointRadius: 4,
             pointHoverRadius: 6,
-            borderDash: index === 2 ? [5, 5] : [] // ให้ปีที่ 3 เป็นเส้นประ
+            borderDash: index === 2 ? [5, 5] : []
         };
     });
 
@@ -326,17 +294,121 @@ function getPriceTrendConfig(sales, filters) {
             labels: monthLabels,
             datasets: datasets
         },
-        options: getMonthlyChartOptions(true) // ส่ง true สำหรับกรณีหลายปี
+        options: getMonthlyChartOptions(true)
     };
 }
 
-// ฟังก์ชันจัดกลุ่มข้อมูลตามเดือน
+function getYearlyIncomeConfig(sales) {
+    // แสดง 3 ปีล่าสุด
+    const allYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))]
+        .sort((a, b) => b - a)
+        .slice(0, 3);
+
+    const yearlyData = {};
+    allYears.forEach(year => {
+        yearlyData[year] = 0;
+    });
+
+    sales.forEach(sale => {
+        const year = new Date(sale.date).getFullYear();
+        if (allYears.includes(year)) {
+            yearlyData[year] += sale.total;
+        }
+    });
+
+    return {
+        type: 'bar',
+        data: {
+            labels: allYears.map(y => `ปี ${y}`),
+            datasets: [{
+                label: 'รายได้รวม (บาท)',
+                data: allYears.map(year => yearlyData[year]),
+                backgroundColor: allYears.map((_, i) => i % 2 === 0 ? '#8BAB4E' : '#E9C46A'),
+                borderColor: '#ffffff',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            ...getChartOptions(),
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.parsed.y.toLocaleString()} บาท (ปี ${allYears[ctx.dataIndex]})`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: value => value.toLocaleString()
+                    }
+                }
+            }
+        }
+    };
+}
+
+function getPricePerKgConfig(sales) {
+    // แสดง 3 ปีล่าสุด
+    const allYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))]
+        .sort((a, b) => b - a)
+        .slice(0, 3);
+
+    const yearlyPriceData = {};
+    allYears.forEach(year => {
+        yearlyPriceData[year] = {totalWeight: 0, totalValue: 0};
+    });
+
+    sales.forEach(sale => {
+        const year = new Date(sale.date).getFullYear();
+        if (allYears.includes(year)) {
+            sale.items.forEach(item => {
+                yearlyPriceData[year].totalWeight += item.weight;
+                yearlyPriceData[year].totalValue += (item.weight * item.pricePerKg);
+            });
+        }
+    });
+
+    const avgPrices = allYears.map(year => {
+        const data = yearlyPriceData[year];
+        return data.totalWeight > 0 ? (data.totalValue / data.totalWeight) : 0;
+    });
+
+    return {
+        type: 'line',
+        data: {
+            labels: allYears.map(y => `ปี ${y}`),
+            datasets: [{
+                label: 'ราคาเฉลี่ย (บาท/กก.)',
+                data: avgPrices,
+                borderColor: '#E76F51',
+                backgroundColor: 'rgba(231, 111, 81, 0.1)',
+                borderWidth: 3,
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            ...getChartOptions(),
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.parsed.y.toFixed(2)} บาท/กก. (ปี ${allYears[ctx.dataIndex]})`
+                    }
+                }
+            }
+        }
+    };
+}
+
 function groupByMonth(sales, year) {
     const months = Array(12).fill().map(() => ({
-            totalWeight: 0,
-            totalValue: 0,
-            salesDetails: [] // เก็บข้อมูลการขายรายวัน
-        }));
+        totalWeight: 0,
+        totalValue: 0,
+        salesDetails: []
+    }));
 
     sales.forEach(sale => {
         const date = new Date(sale.date);
@@ -346,7 +418,6 @@ function groupByMonth(sales, year) {
             months[month].totalWeight += item.weight;
             months[month].totalValue += (item.weight * item.pricePerKg);
 
-            // เก็บข้อมูลการขายรายวัน
             const saleDate = formatDate(date);
             const existingDay = months[month].salesDetails.find(d => d.date === saleDate);
 
@@ -366,13 +437,67 @@ function groupByMonth(sales, year) {
     });
 
     return months.map(month => ({
-            avgPrice: month.totalWeight > 0 ? (month.totalValue / month.totalWeight) : null,
-            totalWeight: month.totalWeight,
-            salesDetails: month.salesDetails.sort((a, b) => new Date(a.date) - new Date(b.date))
-        }));
+        avgPrice: month.totalWeight > 0 ? (month.totalValue / month.totalWeight) : null,
+        totalWeight: month.totalWeight,
+        salesDetails: month.salesDetails.sort((a, b) => new Date(a.date) - new Date(b.date))
+    }));
 }
 
-// ฟังก์ชันตั้งค่ากราฟสำหรับ Monthly view
+function formatDate(date) {
+    const d = new Date(date);
+    return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]} ${d.getFullYear() + 543}`;
+}
+
+function getChartOptions() {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    font: {
+                        family: "'Kanit', sans-serif",
+                        size: 11
+                    },
+                    padding: 20,
+                    usePointStyle: true,
+                    pointStyle: 'circle'
+                }
+            },
+            tooltip: {
+                bodyFont: {
+                    family: "'Kanit', sans-serif"
+                },
+                titleFont: {
+                    family: "'Kanit', sans-serif"
+                },
+                padding: 10,
+                backgroundColor: 'rgba(0,0,0,0.8)'
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                },
+                ticks: {
+                    callback: function (value) {
+                        return value.toLocaleString();
+                    }
+                }
+            },
+            x: {
+                grid: {
+                    display: false
+                }
+            }
+        }
+    };
+}
+
 function getMonthlyChartOptions(isMultiYear = false) {
     return {
         responsive: true,
@@ -417,12 +542,12 @@ function getMonthlyChartOptions(isMultiYear = false) {
                         monthSales.forEach(sale => {
                             const avgPrice = sale.weight > 0 ? (sale.value / sale.weight) : 0;
                             tooltipContent.push(
-                                    `วันที่: ${sale.date}`,
-                                    `- น้ำหนัก: ${sale.weight.toFixed(2)} กก.`,
-                                    `- ราคา: ${avgPrice.toFixed(2)} บาท/กก.`,
-                                    `- มูลค่า: ${sale.value.toFixed(2)} บาท`,
-                                    '------------------'
-                                    );
+                                `วันที่: ${sale.date}`,
+                                `- น้ำหนัก: ${sale.weight.toFixed(2)} กก.`,
+                                `- ราคา: ${avgPrice.toFixed(2)} บาท/กก.`,
+                                `- มูลค่า: ${sale.value.toFixed(2)} บาท`,
+                                '------------------'
+                            );
                         });
 
                         return tooltipContent;
@@ -480,181 +605,6 @@ function getMonthlyChartOptions(isMultiYear = false) {
         interaction: {
             intersect: false,
             mode: 'index'
-        }
-    };
-}
-
-// ฟังก์ชันช่วยเหลือจัดรูปแบบวันที่
-function formatDate(date) {
-    const d = new Date(date);
-    return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-        'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]} ${d.getFullYear() + 543}`;
-}
-
-function getDayOfYear(date) {
-    const start = new Date(date.getFullYear(), 0, 0);
-    const diff = date - start;
-    const oneDay = 1000 * 60 * 60 * 24;
-    return Math.floor(diff / oneDay);
-}
-
-function getYearlyIncomeConfig(sales, filters) {
-    // ไม่สนใจ filter ปี เพราะต้องการแสดงทุกปี
-    const allYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))]
-            .sort((a, b) => b - a) // เรียงจากปีล่าสุดไปเก่าสุด
-            .slice(0, 5); // เลือกเพียง 5 ปีล่าสุด
-
-    const yearlyData = {};
-    allYears.forEach(year => {
-        yearlyData[year] = 0;
-    });
-
-    // คำนวณรายได้รวมแต่ละปี
-    sales.forEach(sale => {
-        const year = new Date(sale.date).getFullYear();
-        if (allYears.includes(year)) {
-            yearlyData[year] += sale.total;
-        }
-    });
-
-    return {
-        type: 'bar',
-        data: {
-            labels: allYears.map(y => `ปี ${y}`),
-            datasets: [{
-                    label: 'รายได้รวม (บาท)',
-                    data: allYears.map(year => yearlyData[year]),
-                    backgroundColor: allYears.map((_, i) =>
-                        i % 2 === 0 ? '#8BAB4E' : '#E9C46A' // สลับสีคู่-คี่
-                    ),
-                    borderColor: '#ffffff',
-                    borderWidth: 1,
-                    borderRadius: 4
-                }]
-        },
-        options: {
-            ...getChartOptions(),
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: ctx => `${ctx.parsed.y.toLocaleString()} บาท (ปี ${allYears[ctx.dataIndex]})`
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: value => value.toLocaleString()
-                    }
-                }
-            }
-        }
-    };
-}
-
-function getPricePerKgConfig(sales, filters) {
-    // ไม่สนใจ filter ปี เพราะต้องการแสดงทุกปี
-    const allYears = [...new Set(sales.map(s => new Date(s.date).getFullYear()))]
-            .sort((a, b) => b - a) // เรียงจากปีล่าสุดไปเก่าสุด
-            .slice(0, 3); // เลือกเพียง 3 ปีล่าสุด
-
-    const yearlyPriceData = {};
-    allYears.forEach(year => {
-        yearlyPriceData[year] = {totalWeight: 0, totalValue: 0};
-    });
-
-    // คำนวณน้ำหนักและมูลค่ารวมแต่ละปี
-    sales.forEach(sale => {
-        const year = new Date(sale.date).getFullYear();
-        if (allYears.includes(year)) {
-            sale.items.forEach(item => {
-                yearlyPriceData[year].totalWeight += item.weight;
-                yearlyPriceData[year].totalValue += (item.weight * item.pricePerKg);
-            });
-        }
-    });
-
-    // คำนวณราคาเฉลี่ยต่อกก.
-    const avgPrices = allYears.map(year => {
-        const data = yearlyPriceData[year];
-        return data.totalWeight > 0 ? (data.totalValue / data.totalWeight) : 0;
-    });
-
-    return {
-        type: 'line',
-        data: {
-            labels: allYears.map(y => `ปี ${y}`),
-            datasets: [{
-                    label: 'ราคาเฉลี่ย (บาท/กก.)',
-                    data: avgPrices,
-                    borderColor: '#E76F51',
-                    backgroundColor: 'rgba(231, 111, 81, 0.1)',
-                    borderWidth: 3,
-                    tension: 0.3,
-                    fill: true
-                }]
-        },
-        options: {
-            ...getChartOptions(),
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: ctx => `${ctx.parsed.y.toFixed(2)} บาท/กก. (ปี ${allYears[ctx.dataIndex]})`
-                    }
-                }
-            }
-        }
-    };
-}
-function getChartOptions() {
-    return {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: {
-                position: 'bottom',
-                labels: {
-                    font: {
-                        family: "'Kanit', sans-serif",
-                        size: 11
-                    },
-                    padding: 20,
-                    usePointStyle: true,
-                    pointStyle: 'circle'
-                }
-            },
-            tooltip: {
-                bodyFont: {
-                    family: "'Kanit', sans-serif"
-                },
-                titleFont: {
-                    family: "'Kanit', sans-serif"
-                },
-                padding: 10,
-                backgroundColor: 'rgba(0,0,0,0.8)'
-            }
-        },
-//        animation: {
-//    duration: 0 // ปิด animation สำหรับข้อมูลมากๆ
-//},
-        scales: {
-            y: {
-                beginAtZero: true,
-                grid: {
-                    color: 'rgba(0, 0, 0, 0.05)'
-                },
-                ticks: {
-                    callback: function (value) {
-                        return value.toLocaleString();
-                    }
-                }
-            },
-            x: {
-                grid: {
-                    display: false
-                }
-            }
         }
     };
 }
